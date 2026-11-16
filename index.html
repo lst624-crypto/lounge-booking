@@ -27,6 +27,11 @@
   .ibtn{width:44px;height:44px;border-radius:10px;display:grid;place-items:center;color:var(--ink)}
   .ibtn:active{background:var(--soft)}
 
+  .abadge{flex:0 0 auto;font-size:13px;font-weight:800;color:#fff;background:var(--warn);padding:5px 10px;border-radius:99px}
+  .abar{background:var(--warn-soft);border:1px solid #efd3b0;border-radius:14px;padding:14px 16px;margin-bottom:14px}
+  .abar b{display:block;font-size:16px;color:#7a3a10} .abar span{font-size:14px;color:#8a5a33}
+  .abar-b{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap} .abar-b .btn{flex:1;white-space:nowrap}
+  .bk .del{flex:0 0 auto;height:40px;padding:0 12px;border-radius:9px;border:1px solid #e3b5ad;background:#fff;color:var(--red);font-size:14px;font-weight:700;text-align:center}
   /* 회의실 */
   .rooms{display:flex;gap:8px;overflow-x:auto;margin:0 -16px 12px;padding:0 16px;scrollbar-width:none}
   .rooms::-webkit-scrollbar{display:none}
@@ -73,7 +78,7 @@
 
   /* 목록 */
   .list{display:flex;flex-direction:column;gap:8px;margin-bottom:24px}
-  .bk{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px 16px;display:flex;align-items:center;gap:14px;width:100%}
+  .bk{cursor:pointer;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px 16px;display:flex;align-items:center;gap:14px;width:100%}
   .bk .tm{flex:0 0 auto;font-size:17px;font-weight:700;line-height:1.3}
   .bk .tm small{display:block;font-size:13px;font-weight:500;color:var(--sub)}
   .bk .who{flex:1;min-width:0;border-left:1px solid var(--line);padding-left:14px}
@@ -187,10 +192,15 @@
 <div class="app">
   <div class="top">
     <h1 id="title">회의실 예약</h1>
+    <span class="abadge" id="adminBadge" hidden>관리자 모드</span>
     <button class="ibtn" id="menuBtn" aria-label="메뉴"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
   </div>
   <div id="banner"></div>
 
+  <div class="abar" id="adminBar" hidden>
+    <div><b>관리자 모드</b><span>회의실을 만들고 예약을 삭제할 수 있어요.</span></div>
+    <div class="abar-b"><button class="btn sm" id="abAdd">＋ 회의실 추가</button><button class="btn ghost sm" id="abManage">회의실·설정 관리</button></div>
+  </div>
   <section id="v-home">
     <div class="rooms" id="rooms" hidden></div>
     <div id="nowCard"></div>
@@ -332,7 +342,11 @@ async function makeFirebaseApi(){
       catch(e){await A.createUserWithEmailAndPassword(auth,ADMIN_EMAIL,pw)}
     },
     async adminLogout(){await A.signOut(auth)},
-    async isAdmin(){try{await F.getDoc(ref("secrets","__admin_check__"));return true}catch(e){return false}},
+    async remove(b){ // 관리자 전용: 예약과 잠금·비공개 정보까지 완전히 삭제
+      const bt=F.writeBatch(db);bt.delete(ref("bookings",b.id));bt.delete(ref("secrets",b.id));
+      if(b.status==="active")(b.slots||[]).forEach(s=>bt.delete(ref("slots",s)));
+      await bt.commit();
+    },
     async getSecret(id){const s=await F.getDoc(ref("secrets",id));return s.exists()?s.data():{}},
     addRoom:d=>F.setDoc(F.doc(col("rooms")),d),
     updateRoom:(id,d)=>F.updateDoc(ref("rooms",id),d),
@@ -435,7 +449,8 @@ $("calBtn").onclick=()=>{
 function renderDay(){
   const el=$("day");
   if(!S.loaded.rooms)return;
-  if(!S.rooms.length){el.innerHTML=`<div class="empty">등록된 회의실이 없어요.<br>관리자가 메뉴 › 관리자 로그인 후 추가할 수 있어요.</div>`;return}
+  if(!S.rooms.length){el.innerHTML=S.admin?`<div class="empty">아직 회의실이 없어요.<br>먼저 회의실을 만들어 주세요.<div style="margin-top:14px"><button class="btn" id="emAdd">＋ 회의실 추가</button></div></div>`
+    :`<div class="empty">등록된 회의실이 없어요.<br>관리자가 메뉴 › 관리자 로그인 후 추가할 수 있어요.</div>`;if($("emAdd"))$("emAdd").onclick=openRoomAdd;return}
   if(!S.loaded.day){el.innerHTML=`<div class="skel"></div><div class="skel"></div>`;return}
   const st=ST(),en=EN(),span=en-st,isT=S.date===today(),nm=nowMin();
   const all=dayList(S.roomId),list=all.filter(b=>!(isT&&toMin(b.end)<=nm)),free=freeRanges(S.roomId);
@@ -443,8 +458,8 @@ function renderDay(){
   // 예약 목록
   h+=`<div class="list">`;
   h+=list.length?list.map(b=>{const live=isT&&toMin(b.start)<=nm&&nm<toMin(b.end);
-    return `<button class="bk${live?" now-on":""}" data-id="${esc(b.id)}"><div class="tm num">${esc(b.start)} – ${esc(b.end)}<small>${dur(toMin(b.end)-toMin(b.start))}</small></div>
-      <div class="who"><div class="co">${esc(b.company||"")}${live?'<span class="tag live">사용 중</span>':""}${isMine(b)?'<span class="tag">내 예약</span>':""}</div><div class="nm">${esc(b.name)}</div></div>${ARW}</button>`}).join("")
+    return `<div role="button" tabindex="0" class="bk${live?" now-on":""}" data-id="${esc(b.id)}"><div class="tm num">${esc(b.start)} – ${esc(b.end)}<small>${dur(toMin(b.end)-toMin(b.start))}</small></div>
+      <div class="who"><div class="co">${esc(b.company||"")}${live?'<span class="tag live">사용 중</span>':""}${isMine(b)?'<span class="tag">내 예약</span>':""}</div><div class="nm">${esc(b.name)}</div></div>${tail(b)}</div>`}).join("")
     :`<div class="empty">${all.length?"남은 예약이 없어요.":"아직 예약이 없어요."}</div>`;
   h+=`</div><div class="sec"><b>예약할 수 있는 시간</b></div><div class="list">`;
   h+=free.length?free.map(([a,b])=>`<button class="free" data-t="${a}"><div class="tm num">${fmt(a)} – ${fmt(b)}<small>${dur(b-a)}</small></div><span class="go">예약</span></button>`).join("")
@@ -452,6 +467,7 @@ function renderDay(){
   el.innerHTML=h+"</div>";
 }
 $("day").addEventListener("click",e=>{
+  const dl=e.target.closest(".del");if(dl)return delClick(dl,S.day);
   const bk=e.target.closest(".bk");if(bk)return openDetail(S.day.find(b=>b.id===bk.dataset.id));
   const fr=e.target.closest(".free");if(fr)openForm({start:+fr.dataset.t});
 });
@@ -597,16 +613,22 @@ function openDetail(b){
 }
 
 /* ---------- 내 예약 · 전체 예약 ---------- */
-function rowHtml(b){return `<button class="bk" data-id="${esc(b.id)}"><div class="tm num">${dObj(b.date).getMonth()+1}/${dObj(b.date).getDate()} (${WD[dObj(b.date).getDay()]})<small>${esc(b.start)} – ${esc(b.end)}</small></div>
-  <div class="who"><div class="co">${esc(b.company||"")}</div><div class="nm">${esc(roomName(b))} · ${esc(b.name)}</div></div>${ARW}</button>`}
+function tail(b){return S.admin?`<button class="del" data-del="${esc(b.id)}">삭제</button>`:ARW}
+async function delClick(btn,list){ // 관리자: 두 번 눌러 삭제
+  if(btn.dataset.armed!=="1"){btn.dataset.armed="1";btn.textContent="정말 삭제";setTimeout(()=>{btn.dataset.armed="";btn.textContent="삭제"},3000);return}
+  const b=list.find(x=>x.id===btn.dataset.del);if(!b)return;btn.disabled=true;
+  try{await api.remove(b);toast("예약을 삭제했어요.")}catch(e){btn.disabled=false;toast("삭제하지 못했어요.")}
+}
+function rowHtml(b){return `<div role="button" tabindex="0" class="bk" data-id="${esc(b.id)}"><div class="tm num">${dObj(b.date).getMonth()+1}/${dObj(b.date).getDate()} (${WD[dObj(b.date).getDay()]})<small>${esc(b.start)} – ${esc(b.end)}</small></div>
+  <div class="who"><div class="co">${esc(b.company||"")}</div><div class="nm">${esc(roomName(b))} · ${esc(b.name)}</div></div>${tail(b)}</div>`}
 function renderMine(){
   const list=S.mine.filter(upcoming).sort(sortB);
   $("mineBadge").innerHTML=list.length?` <span class="badge">${list.length}</span>`:"";
   $("mineList").innerHTML=list.length?list.map(rowHtml).join(""):`<div class="empty">예정된 예약이 없어요.</div>`;
 }
-$("mineList").addEventListener("click",e=>{const b=e.target.closest(".bk");if(b)openDetail(S.mine.find(x=>x.id===b.dataset.id))});
+$("mineList").addEventListener("click",e=>{const dl=e.target.closest(".del");if(dl)return delClick(dl,S.mine);const b=e.target.closest(".bk");if(b)openDetail(S.mine.find(x=>x.id===b.dataset.id))});
 function renderAll(){const list=S.all.filter(upcoming).sort(sortB);$("allList").innerHTML=list.length?list.map(rowHtml).join(""):`<div class="empty">예정된 예약이 없어요.</div>`}
-$("allList").addEventListener("click",e=>{const b=e.target.closest(".bk");if(b)openDetail(S.all.find(x=>x.id===b.dataset.id))});
+$("allList").addEventListener("click",e=>{const dl=e.target.closest(".del");if(dl)return delClick(dl,S.all);const b=e.target.closest(".bk");if(b)openDetail(S.all.find(x=>x.id===b.dataset.id))});
 
 /* ---------- 관리 ---------- */
 function renderAdmin(){
@@ -659,10 +681,25 @@ function openLogin(){
     const id=toKeys($("lId").value.trim()),pw=toKeys($("lPw").value);
     if(id!==ADMIN_ID||pw.length<6){$("lErr").textContent="아이디 또는 비밀번호가 맞지 않아요.";return}
     $("lGo").disabled=true;$("lGo").textContent="확인 중…";
-    try{await api.adminLogin(pw);closeSheet()}
+    try{await api.adminLogin(pw);show("home");
+      openSheet("로그인되었습니다",`<div class="done"><div class="ok">${CHK.replace('width="16" height="16"','width="30" height="30"')}</div><h3>관리자로 로그인되었습니다</h3></div>
+        <div class="note" style="text-align:center;margin:-6px 0 18px;font-size:15px">화면 위쪽에 ‘관리자 모드’가 표시돼요.<br>회의실을 만들거나 예약을 삭제할 수 있어요.</div>
+        <div class="btns"><button class="btn" id="okAdd">＋ 회의실 추가하기</button><button class="btn ghost" data-close>확인</button></div>`);
+      $("okAdd").onclick=openRoomAdd}
     catch(e){$("lGo").disabled=false;$("lGo").textContent="로그인";$("lErr").textContent=e&&e.code==="auth/too-many-requests"?"시도가 너무 많아요. 잠시 후 다시 해 주세요.":e&&e.code==="auth/operation-not-allowed"?"관리자 로그인이 아직 켜져 있지 않아요.":"아이디 또는 비밀번호가 맞지 않아요."}
   };
   $("lGo").onclick=go;$("lPw").onkeydown=e=>{if(e.key==="Enter")go()};
+}
+function openRoomAdd(){
+  openSheet("회의실 추가",`<div class="f"><label>회의실 이름 <em>*</em></label><input class="in" id="raName" maxlength="20" placeholder="예: 미팅룸 2"></div>
+    <div class="f"><label>수용 인원 (선택)</label><input class="in" id="raCap" type="number" inputmode="numeric" placeholder="예: 6"></div>
+    <div class="err" id="raErr"></div><div class="btns"><button class="btn" id="raGo">회의실 추가</button><button class="btn ghost" data-close>닫기</button></div>`);
+  $("raGo").onclick=async()=>{
+    const name=$("raName").value.trim();if(!name){$("raErr").textContent="회의실 이름을 입력해 주세요.";return}
+    const order=S.rooms.reduce((m,r)=>Math.max(m,r.order||0),0)+1;$("raGo").disabled=true;
+    try{await api.addRoom({name,capacity:+$("raCap").value||0,order});closeSheet();toast(`‘${name}’ 회의실을 추가했어요.`)}
+    catch(e){$("raGo").disabled=false;$("raErr").textContent="추가하지 못했어요. 관리자로 다시 로그인해 주세요."}
+  };
 }
 function loadQrLib(){if(window.QRCode)return Promise.resolve();
   return loadQrLib.p||(loadQrLib.p=new Promise((res,rej)=>{const sc=document.createElement("script");sc.src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js";sc.onload=res;sc.onerror=()=>{loadQrLib.p=null;rej()};document.head.appendChild(sc)}))}
@@ -675,11 +712,12 @@ function showQr(){
   $("qPrint").onclick=async()=>{$("printTitle").textContent=S.settings.title;await makeQr($("printQr"),840);setTimeout(()=>window.print(),200)};
 }
 
+$("abAdd").onclick=openRoomAdd;$("abManage").onclick=()=>show("admin");
 /* ---------- 탭 ---------- */
 $("nav").addEventListener("click",e=>{const b=e.target.closest("button[data-v]");if(b)show(b.dataset.v)});
 function show(v){S.view=v;
   document.querySelectorAll("#nav button").forEach(b=>b.classList.toggle("on",b.dataset.v===v));
-  ["home","mine","admin"].forEach(x=>$("v-"+x).hidden=x!==v);
+  ["home","mine","admin"].forEach(x=>$("v-"+x).hidden=x!==v);$("adminBar").hidden=!(S.admin&&v==="home");
   $("cta").hidden=v==="admin";window.scrollTo(0,0);if(v==="admin")renderAdmin()}
 
 /* ---------- 실시간 연결 ---------- */
@@ -710,10 +748,9 @@ async function start(){
   subToday();
   api.onUser(async u=>{S.user=u;
     S.unsub.mine&&S.unsub.mine();S.unsub.mine=api.watchMine(u.uid,list=>{S.mine=list;renderMine();renderDay()},()=>{});
-    const was=S.admin;S.admin=u.email===ADMIN_EMAIL&&await api.isAdmin();$("navAdmin").hidden=!S.admin;
+    S.admin=u.email===ADMIN_EMAIL;$("navAdmin").hidden=!S.admin;$("adminBadge").hidden=!S.admin;$("adminBar").hidden=!(S.admin&&S.view==="home");renderMine();
     S.unsub.all&&S.unsub.all();S.unsub.all=null;
-    if(S.admin){S.unsub.all=api.watchFrom(today(),list=>{S.all=list;if(S.view==="admin")renderAll()},()=>{});
-      if(!was){show("admin");toast(S.rooms.length?"관리자로 로그인했어요.":"관리자로 로그인했어요. 회의실을 추가해 주세요.")}}
+    if(S.admin){S.unsub.all=api.watchFrom(today(),list=>{S.all=list;if(S.view==="admin")renderAll()},()=>{});}
     else if(S.view==="admin")show("home");
     renderDay()},()=>banner("익명 접속이 꺼져 있어요. 관리자에게 알려 주세요.",true));
   setInterval(()=>{if(today()!==cur){const was=S.date===cur;cur=today();subToday();if(was||S.date<cur){S.date=cur;subDay()}renderDates()}
