@@ -217,7 +217,23 @@
         (import 줄이 같이 들어가도 괜찮습니다)
      ===================================================================== -->
 <script type="text/plain" id="firebase-config">
-여기에_Firebase_설정_붙여넣기
+// Import the functions you need from the SDKs you need
+import { initializeApp } from "firebase/app";
+// TODO: Add SDKs for Firebase products that you want to use
+// https://firebase.google.com/docs/web/setup#available-libraries
+
+// Your web app's Firebase configuration
+const firebaseConfig = {
+  apiKey: "AIzaSyBwJ8Zr4XCNbXzyzfCDaGRbe8bYF9p2aAU",
+  authDomain: "lounge-booking-b543f.firebaseapp.com",
+  projectId: "lounge-booking-b543f",
+  storageBucket: "lounge-booking-b543f.firebasestorage.app",
+  messagingSenderId: "780302841255",
+  appId: "1:780302841255:web:c9b84b63a8b7240717b282"
+};
+
+// Initialize Firebase
+const app = initializeApp(firebaseConfig);
 </script>
 <script type="module">
 /* Firebase 설정은 아래 <script id="firebase-config"> 블록에서 읽어 옵니다. */
