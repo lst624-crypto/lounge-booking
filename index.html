@@ -436,17 +436,9 @@ function renderDay(){
   if(!S.loaded.day){el.innerHTML=`<div class="skel"></div><div class="skel"></div>`;return}
   const st=ST(),en=EN(),span=en-st,isT=S.date===today(),nm=nowMin();
   const all=dayList(S.roomId),list=all.filter(b=>!(isT&&toMin(b.end)<=nm)),free=freeRanges(S.roomId);
-  const pct=m=>Math.max(0,Math.min(100,(m-st)/span*100));
-  // 막대
-  let bar=all.map(b=>`<div class="seg${isMine(b)?" mine":""}" style="left:${pct(toMin(b.start))}%;width:${pct(toMin(b.end))-pct(toMin(b.start))}%"></div>`).join("");
-  if(isT&&nm>st)bar+=`<div class="past" style="width:${pct(nm)}%"></div>`+(nm<en?`<div class="nowl" style="left:${pct(nm)}%"></div>`:"");
-  const hrs=span/60,every=hrs<=6?1:hrs<=12?2:3;let ticks="";
-  for(let m=st;m<=en;m+=every*60)ticks+=`<span style="left:${pct(m)}%">${Math.floor(m/60)}시</span>`;
-  let h=`<div class="sec"><b>${dLabel(S.date)}</b><span>예약 ${all.length}건</span></div>
-    <div class="bar-card"><div class="bar">${bar}</div><div class="ticks num">${ticks}</div>
-    <div class="legend"><span><i style="background:var(--ink)"></i>예약됨</span><span><i style="background:var(--warn)"></i>내 예약</span><span><i style="background:var(--brand-soft);border:1px solid #c5d9cf"></i>비어 있음</span></div></div>`;
+  let h=`<div class="sec"><b>${dLabel(S.date)}</b><span>예약 ${all.length}건</span></div>`;
   // 예약 목록
-  h+=`<div class="sec"><b>예약된 시간</b></div><div class="list">`;
+  h+=`<div class="list">`;
   h+=list.length?list.map(b=>{const live=isT&&toMin(b.start)<=nm&&nm<toMin(b.end);
     return `<button class="bk${live?" now-on":""}" data-id="${esc(b.id)}"><div class="tm num">${esc(b.start)} – ${esc(b.end)}<small>${dur(toMin(b.end)-toMin(b.start))}</small></div>
       <div class="who"><div class="co">${esc(b.company||"")}${live?'<span class="tag live">사용 중</span>':""}${isMine(b)?'<span class="tag">내 예약</span>':""}</div><div class="nm">${esc(b.name)}</div></div>${ARW}</button>`}).join("")
