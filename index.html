@@ -501,7 +501,7 @@ function openForm(pre={}){
   if(!S.rooms.length)return toast("등록된 회의실이 없어요.");
   if(!S.user)return toast("연결 중이에요. 잠시 후 다시 눌러 주세요.");
   if(!S.loaded.day)return toast("예약 현황을 불러오는 중이에요.");
-  F.roomId=S.roomId;F.start=pre.start??null;F.end=null;F.checks=[false,false,false];
+  F.busy=false;F.roomId=S.roomId;F.start=pre.start??null;F.end=null;F.checks=[false,false,false];
   openSheet("회의실 예약",`
     <div class="sub" id="fSub"></div>
     <div class="f"><label>회의실</label><select class="in" id="fRoom"></select></div>
@@ -538,6 +538,7 @@ function showMask(){const v=$("fName").value.trim();$("fMask").textContent=v?`�
 function fButton(){const ok=F.checks.every(Boolean)&&F.hasTime,b=$("fGo");b.disabled=!ok;
   b.textContent=!F.hasTime?"예약할 수 있는 시간이 없어요":ok?"예약하기":`이용 수칙 ${F.checks.filter(x=>!x).length}가지를 확인해 주세요`}
 function fRefresh(){
+  if(F.busy||!$("fStart"))return;
   $("fRoom").innerHTML=S.rooms.map(r=>`<option value="${esc(r.id)}"${r.id===F.roomId?" selected":""}>${esc(r.name)}${r.capacity?` (${esc(r.capacity)}명)`:""}</option>`).join("");
   $("fSub").textContent=dLabel(S.date);
   const so=startOptions();F.hasTime=so.length>0;
@@ -564,15 +565,16 @@ async function submit(){
   if(!(F.end>F.start))return err("시간을 다시 선택해 주세요.");
   ls("lb_co",company);ls("lb_name",name);ls("lb_email",email);
   const go=$("fGo");go.disabled=true;go.textContent="예약 중…";err("");
-  const id=api.newId(),date=S.date,slots=granules(F.roomId,date,F.start,F.end),r=room(F.roomId);
-  const fail=t=>{go.disabled=false;go.textContent="예약하기";err(t)};
+  const st=F.start,en=F.end,roomId=F.roomId;F.busy=true; // 저장 중에는 선택한 시간을 고정
+  const id=api.newId(),date=S.date,slots=granules(roomId,date,st,en),r=room(roomId);
+  const fail=t=>{F.busy=false;go.disabled=false;go.textContent="예약하기";err(t);fRefresh()};
   try{
     if(await api.anySlotTaken(slots))return fail("방금 다른 예약이 들어왔어요. 시간을 다시 선택해 주세요.");
-    await api.create(id,{roomId:F.roomId,roomName:r?r.name:"",date,start:fmt(F.start),end:fmt(F.end),company,name:maskName(name),uid:S.user.uid,status:"active",slots},{pinKey:await pinKey(id,pin),email,name},slots);
+    await api.create(id,{roomId,roomName:r?r.name:"",date,start:fmt(st),end:fmt(en),company,name:maskName(name),uid:S.user.uid,status:"active",slots},{pinKey:await pinKey(id,pin),email,name},slots);
     const mail=S.settings.mailUrl;
     if(mail)fetch(mail,{method:"POST",mode:"no-cors",keepalive:true,headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify({id,email,name})}).catch(()=>{});
     openSheet("예약 완료",`<div class="done"><div class="ok"><svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></div><h3>예약이 완료되었습니다</h3></div>
-      <dl class="info"><dt>회의실</dt><dd>${esc(r?.name||"")}</dd><dt>일시</dt><dd class="num">${esc(dLabel(date))}<br>${fmt(F.start)} – ${fmt(F.end)} (${dur(F.end-F.start)})</dd><dt>회사명</dt><dd>${esc(company)}</dd><dt>예약자</dt><dd>${esc(name)}</dd></dl>
+      <dl class="info"><dt>회의실</dt><dd>${esc(r?.name||"")}</dd><dt>일시</dt><dd class="num">${esc(dLabel(date))}<br>${fmt(st)} – ${fmt(en)} (${dur(en-st)})</dd><dt>회사명</dt><dd>${esc(company)}</dd><dt>예약자</dt><dd>${esc(name)}</dd></dl>
       <div class="note" style="margin:-8px 0 16px">${mail?`확인 메일을 ${esc(email)} 주소로 보냈어요. `:""}취소할 때는 방금 정한 취소 비밀번호 4자리가 필요해요.</div>
       <button class="btn" data-close>확인</button>`);
   }catch(e){fail(e&&e.code==="permission-denied"?"방금 다른 예약이 들어왔어요. 시간을 다시 선택해 주세요.":"저장하지 못했어요. 인터넷 연결을 확인해 주세요.")}
