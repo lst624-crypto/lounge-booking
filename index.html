@@ -464,8 +464,9 @@ function openSheet(title,html){
   $("scrim").classList.add("on");$("sheet").classList.add("on");document.body.style.overflow="hidden";
 }
 function hideSheet(){sheetOpen=false;$("scrim").classList.remove("on");$("sheet").classList.remove("on");document.body.style.overflow=""}
-function closeSheet(){if(!sheetOpen)return;if(history.state&&history.state.sheet){try{history.back();return}catch(e){}}hideSheet()}
-window.addEventListener("popstate",()=>{if(sheetOpen)hideSheet()});
+let skipPop=0;
+function closeSheet(){if(!sheetOpen)return;hideSheet();if(history.state&&history.state.sheet){skipPop++;try{history.back()}catch(e){skipPop--}}}
+window.addEventListener("popstate",()=>{if(skipPop>0){skipPop--;return}if(sheetOpen)hideSheet()});
 $("scrim").onclick=closeSheet;$("shClose").onclick=closeSheet;
 document.addEventListener("keydown",e=>{if(e.key==="Escape")closeSheet()});
 $("sheetBody").addEventListener("click",e=>{if(e.target.closest("[data-close]"))closeSheet()});
