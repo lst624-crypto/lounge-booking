@@ -6,19 +6,13 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // 기본 관리자(삭제 불가). 추가 관리자는 사이트의 관리 탭에서 등록합니다(admins 컬렉션).
-    function ownerEmails() {
-      return ['lst624@tadstory.com'];
-    }
-
-    function signedIn() { return request.auth != null; }
+    // 공용 관리자 계정 (아이디 tadstory 로 로그인하는 이메일/비밀번호 계정)
     function isAdmin() {
-      return signedIn()
-        && ('email' in request.auth.token)
-        && request.auth.token.get('email_verified', false) == true
-        && (request.auth.token.email in ownerEmails()
-            || exists(/databases/$(database)/documents/admins/$(request.auth.token.email)));
+      return request.auth != null
+        && request.auth.token.get('email', '') == 'tadstory@lounge-booking.local'
+        && request.auth.token.firebase.sign_in_provider == 'password';
     }
+    function signedIn() { return request.auth != null; }
     function isStr(v, lo, hi) { return v is string && v.size() >= lo && v.size() <= hi; }
     function bookingPath(id) { return /databases/$(database)/documents/bookings/$(id); }
 
@@ -31,12 +25,8 @@ service cloud.firestore {
       allow read: if true;
       allow write: if isAdmin();
     }
-    // 추가 관리자 목록 (문서 ID = 구글 계정 이메일)
-    match /admins/{email} {
-      allow read, write: if isAdmin();
-    }
 
-    // 예약: 누구나 보기. 생성은 익명 접속자 누구나(형식 검사), 취소는 본인 기기·비밀번호·관리자만
+    // 예약: 누구나 보기. 생성은 익명 접속자 누구나(형식 검사), 취소는 취소 비밀번호가 맞거나 관리자일 때만
     match /bookings/{id} {
       allow read: if true;
 
@@ -67,7 +57,6 @@ service cloud.firestore {
         && request.resource.data.cancelledAt == request.time
         && (
           isAdmin()
-          || (signedIn() && resource.data.uid == request.auth.uid)
           || request.resource.data.cancelKey == get(/databases/$(database)/documents/secrets/$(id)).data.pinKey
         );
 

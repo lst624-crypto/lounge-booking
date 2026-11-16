@@ -202,10 +202,16 @@
   <section id="v-mine" hidden>
     <div class="sec" style="margin-top:6px"><b>내 예약</b><span>이 기기에서 한 예약</span></div>
     <div class="list" id="mineList"></div>
-    <p class="hint">다른 기기에서 한 예약은 여기에 보이지 않아요. 예약 현황에서 해당 예약을 누른 뒤, 예약할 때 정한 취소 비밀번호 4자리로 취소할 수 있어요.</p>
+    <p class="hint">예약을 누르면 취소할 수 있어요. 취소하려면 예약할 때 정한 취소 비밀번호 4자리가 필요해요. 다른 기기에서 한 예약은 ‘예약 현황’에서 찾아 같은 방법으로 취소하세요.</p>
   </section>
 
   <section id="v-admin" hidden>
+    <div class="card">
+      <h3>회의실 관리</h3>
+      <div id="roomEdit"></div>
+      <div class="rrow"><input class="in" id="nrName" placeholder="새 회의실 이름" maxlength="20"><input class="in" id="nrCap" type="number" inputmode="numeric" placeholder="인원"></div>
+      <button class="btn ghost" id="nrAdd">회의실 추가</button>
+    </div>
     <div class="card">
       <h3>기본 설정</h3>
       <div class="f"><label>페이지 제목</label><input class="in" id="sTitle" maxlength="30"></div>
@@ -220,19 +226,6 @@
       <div class="f"><label>확인 메일 연결 주소</label><input class="in" id="sMail" placeholder="https://script.google.com/macros/s/…/exec" inputmode="url"><div class="note">비워 두면 확인 메일을 보내지 않아요.</div></div>
       <div class="err" id="sMsg"></div>
       <button class="btn" id="sSave">설정 저장</button>
-    </div>
-    <div class="card">
-      <h3>회의실</h3>
-      <div id="roomEdit"></div>
-      <div class="rrow"><input class="in" id="nrName" placeholder="새 회의실 이름" maxlength="20"><input class="in" id="nrCap" type="number" inputmode="numeric" placeholder="인원"></div>
-      <button class="btn ghost" id="nrAdd">회의실 추가</button>
-    </div>
-    <div class="card">
-      <h3>관리자 계정</h3>
-      <div id="adminList"></div>
-      <div class="f" style="margin-top:14px"><input class="in" id="naEmail" type="email" inputmode="email" placeholder="추가할 구글 계정 이메일"></div>
-      <button class="btn ghost" id="naAdd">관리자 추가</button>
-      <div class="note">추가된 사람은 메뉴 › 관리자 로그인에서 해당 구글 계정으로 로그인하면 관리 탭을 쓸 수 있어요.</div>
     </div>
     <div class="sec"><b>전체 예약</b><span>오늘 이후</span></div>
     <div class="list" id="allList"></div>
@@ -283,6 +276,16 @@ function readFirebaseConfig(){
   if(!m)throw new Error("no-config");
   return Function('"use strict";return ('+m[0]+')')();
 }
+const ADMIN_ID="tadstory", ADMIN_EMAIL="tadstory@lounge-booking.local";
+// 한글 자판으로 친 글자를 같은 키의 영문으로 바꿈 (비밀번호를 한/영 어느 상태로 쳐도 같게)
+function toKeys(str){
+  const C="r R s e E f a q Q t T d w W c z x v g".split(" "),V="k o i O j p u P h hk ho hl y n nj np nl b m ml l".split(" "),
+    T=" r R rt s sw sg e f fr fa fq ft fx fv fg a q qt t T d w c z x v g".split(" "),J="r R rt s sw sg e E f fr fa fq ft fx fv fg a q Q qt t T d w W c z x v g k o i O j p u P h hk ho hl y n nj np nl b m ml l".split(" ");
+  let o="";for(const ch of str){const c=ch.charCodeAt(0);
+    if(c>=0xAC00&&c<=0xD7A3){const n=c-0xAC00;o+=C[Math.floor(n/588)]+V[Math.floor(n%588/28)]+T[n%28]}
+    else if(c>=0x3131&&c<=0x3163)o+=J[c-0x3131];else o+=ch}
+  return o.toLowerCase();
+}
 const GRAN=30; // 겹침 방지용 내부 잠금 단위(분). 바꾸지 마세요.
 const $=id=>document.getElementById(id);
 const WD=["일","월","화","수","목","금","토"];
@@ -308,7 +311,6 @@ async function makeFirebaseApi(){
     watchDate:(date,cb,e)=>F.onSnapshot(F.query(col("bookings"),F.where("date","==",date)),s=>cb(list(s)),e),
     watchMine:(uid,cb,e)=>F.onSnapshot(F.query(col("bookings"),F.where("uid","==",uid)),s=>cb(list(s)),e),
     watchFrom:(date,cb,e)=>F.onSnapshot(F.query(col("bookings"),F.where("date",">=",date)),s=>cb(list(s)),e),
-    watchAdmins:(cb,e)=>F.onSnapshot(col("admins"),s=>cb(s.docs.map(d=>d.id)),e),
     newId:()=>F.doc(col("bookings")).id,
     async anySlotTaken(ids){const r=await Promise.all(ids.map(i=>F.getDoc(ref("slots",i))));return r.some(x=>x.exists())},
     async create(id,b,secret,slotIds){
@@ -325,7 +327,10 @@ async function makeFirebaseApi(){
       (b.slots||[]).forEach(s=>bt.delete(ref("slots",s)));
       await bt.commit();
     },
-    async adminLogin(){await A.signInWithPopup(auth,new A.GoogleAuthProvider())},
+    async adminLogin(pw){ // 공용 관리자 계정. 처음 로그인할 때 계정이 만들어지고, 이후에는 같은 비밀번호로만 들어갈 수 있음
+      try{await A.signInWithEmailAndPassword(auth,ADMIN_EMAIL,pw)}
+      catch(e){await A.createUserWithEmailAndPassword(auth,ADMIN_EMAIL,pw)}
+    },
     async adminLogout(){await A.signOut(auth)},
     async isAdmin(){try{await F.getDoc(ref("secrets","__admin_check__"));return true}catch(e){return false}},
     async getSecret(id){const s=await F.getDoc(ref("secrets",id));return s.exists()?s.data():{}},
@@ -333,8 +338,6 @@ async function makeFirebaseApi(){
     updateRoom:(id,d)=>F.updateDoc(ref("rooms",id),d),
     deleteRoom:id=>F.deleteDoc(ref("rooms",id)),
     saveSettings:d=>F.setDoc(ref("settings","main"),d),
-    addAdmin:email=>F.setDoc(ref("admins",email),{addedAt:F.serverTimestamp()}),
-    removeAdmin:email=>F.deleteDoc(ref("admins",email)),
   };
 }
 
@@ -489,7 +492,7 @@ function openForm(pre={}){
   F.roomId=S.roomId;F.start=pre.start??null;F.end=null;F.checks=[false,false,false];
   openSheet("회의실 예약",`
     <div class="sub" id="fSub"></div>
-    ${S.rooms.length>1?`<div class="f"><span class="flabel">회의실</span><div class="chips" id="fRooms"></div></div>`:""}
+    <div class="f"><label>회의실</label><select class="in" id="fRoom"></select></div>
     <div class="two">
       <div class="f"><label>시작 시간</label><select class="in num" id="fStart"></select></div>
       <div class="f"><label>종료 시간</label><select class="in num" id="fEnd"></select></div>
@@ -502,14 +505,14 @@ function openForm(pre={}){
     <div class="f"><label>이메일 <em>*</em></label><input class="in" id="fEmail" type="email" inputmode="email" autocomplete="email" maxlength="80" placeholder="name@company.com" enterkeyhint="next">
       <div class="note">예약 확인 메일을 보내 드려요. 다른 사람에게는 보이지 않아요.</div></div>
     <div class="f"><label>취소 비밀번호 (숫자 4자리) <em>*</em></label><input class="in pin num" id="fPin" type="password" inputmode="numeric" pattern="[0-9]*" autocomplete="off" placeholder="0000">
-      <div class="note">다른 기기에서 예약을 취소할 때 필요해요.</div></div>
+      <div class="note">예약을 취소할 때 꼭 필요해요. 잊지 않게 기억해 주세요.</div></div>
     <span class="flabel">이용 수칙 확인 <em style="color:var(--red);font-style:normal">*</em></span>
     <div class="rules" id="fRules">${RULES.map((r,i)=>`<button type="button" class="rule" data-i="${i}" role="checkbox" aria-checked="false"><span class="box">${CHK}</span><span><b>${r[0]}</b><span>${r[1]}</span></span></button>`).join("")}</div>
     <div class="err" id="fErr"></div>
     <div class="btns"><button class="btn" id="fGo" disabled>이용 수칙 3가지를 확인해 주세요</button><button class="btn ghost" data-close>취소</button></div>`);
   $("fCo").value=ls("lb_co");$("fName").value=ls("lb_name");$("fEmail").value=ls("lb_email");
   fRefresh();showMask();
-  if($("fRooms"))$("fRooms").onclick=e=>{const c=e.target.closest(".chip");if(c){F.roomId=c.dataset.id;F.end=null;fRefresh()}};
+  $("fRoom").onchange=()=>{F.roomId=$("fRoom").value;F.end=null;fRefresh()};
   $("fStart").onchange=()=>{F.start=+$("fStart").value;F.end=null;fRefresh()};
   $("fEnd").onchange=()=>{F.end=+$("fEnd").value;fRefresh()};
   $("fDur").onclick=e=>{const c=e.target.closest(".chip");if(c&&!c.disabled){F.end=c.dataset.m==="max"?F.maxEnd:F.start+ +c.dataset.m;fRefresh()}};
@@ -523,8 +526,8 @@ function showMask(){const v=$("fName").value.trim();$("fMask").textContent=v?`�
 function fButton(){const ok=F.checks.every(Boolean)&&F.hasTime,b=$("fGo");b.disabled=!ok;
   b.textContent=!F.hasTime?"예약할 수 있는 시간이 없어요":ok?"예약하기":`이용 수칙 ${F.checks.filter(x=>!x).length}가지를 확인해 주세요`}
 function fRefresh(){
-  if($("fRooms"))$("fRooms").innerHTML=S.rooms.map(r=>`<button type="button" class="chip${r.id===F.roomId?" on":""}" data-id="${esc(r.id)}">${esc(r.name)}</button>`).join("");
-  $("fSub").textContent=`${dLabel(S.date)} · ${room(F.roomId)?.name||""}`;
+  $("fRoom").innerHTML=S.rooms.map(r=>`<option value="${esc(r.id)}"${r.id===F.roomId?" selected":""}>${esc(r.name)}${r.capacity?` (${esc(r.capacity)}명)`:""}</option>`).join("");
+  $("fSub").textContent=dLabel(S.date);
   const so=startOptions();F.hasTime=so.length>0;
   if(!so.length){$("fStart").innerHTML=`<option>없음</option>`;$("fEnd").innerHTML="";$("fDur").innerHTML="";$("fSum").textContent="이 날은 예약할 수 있는 시간이 없어요.";return fButton()}
   if(!so.includes(F.start))F.start=so[0];
@@ -558,7 +561,7 @@ async function submit(){
     if(mail)fetch(mail,{method:"POST",mode:"no-cors",keepalive:true,headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify({id,email,name})}).catch(()=>{});
     openSheet("예약 완료",`<div class="done"><div class="ok"><svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></div><h3>예약이 완료되었습니다</h3></div>
       <dl class="info"><dt>회의실</dt><dd>${esc(r?.name||"")}</dd><dt>일시</dt><dd class="num">${esc(dLabel(date))}<br>${fmt(F.start)} – ${fmt(F.end)} (${dur(F.end-F.start)})</dd><dt>회사명</dt><dd>${esc(company)}</dd><dt>예약자</dt><dd>${esc(name)}</dd></dl>
-      <div class="note" style="margin:-8px 0 16px">${mail?`확인 메일을 ${esc(email)} 주소로 보냈어요. `:""}취소는 이 기기의 ‘내 예약’에서 하거나, 다른 기기에서는 취소 비밀번호로 할 수 있어요.</div>
+      <div class="note" style="margin:-8px 0 16px">${mail?`확인 메일을 ${esc(email)} 주소로 보냈어요. `:""}취소할 때는 방금 정한 취소 비밀번호 4자리가 필요해요.</div>
       <button class="btn" data-close>확인</button>`);
   }catch(e){fail(e&&e.code==="permission-denied"?"방금 다른 예약이 들어왔어요. 시간을 다시 선택해 주세요.":"저장하지 못했어요. 인터넷 연결을 확인해 주세요.")}
 }
@@ -567,7 +570,7 @@ $("cta").onclick=()=>{if(S.view!=="home")show("home");openForm()};
 /* ---------- 상세 · 취소 ---------- */
 function openDetail(b){
   if(!b)return;
-  const direct=isMine(b)||S.admin,past=b.date<today()||(b.date===today()&&toMin(b.end)<=nowMin());
+  const direct=S.admin,past=b.date<today()||(b.date===today()&&toMin(b.end)<=nowMin());
   openSheet("예약 정보",`<dl class="info"><dt>회의실</dt><dd>${esc(roomName(b))}</dd>
     <dt>일시</dt><dd class="num">${esc(dLabel(b.date))}<br>${esc(b.start)} – ${esc(b.end)} (${dur(toMin(b.end)-toMin(b.start))})</dd>
     <dt>회사명</dt><dd>${esc(b.company||"-")}</dd>
@@ -613,18 +616,8 @@ function renderAdmin(){
   $("sSlot").value=s.slotMin;$("sDays").value=s.maxDays;
   $("roomEdit").innerHTML=S.rooms.map(r=>`<div data-id="${esc(r.id)}"><div class="rrow"><input class="in" value="${esc(r.name)}" data-k="name" maxlength="20"><input class="in" type="number" inputmode="numeric" value="${esc(r.capacity||"")}" data-k="cap" placeholder="인원"></div>
     <div class="rbtns"><button class="btn ghost sm" data-a="save" style="flex:1">이름·인원 저장</button><button class="btn danger sm" data-a="del">삭제</button></div></div>`).join("")||`<p class="note">회의실을 추가해 주세요.</p>`;
-  renderAdmins();renderAll();
+  renderAll();
 }
-function renderAdmins(){
-  $("adminList").innerHTML=`<div class="arow"><span>lst624@tadstory.com <small>(기본 관리자)</small></span></div>`+
-    S.admins.map(e=>`<div class="arow"><span>${esc(e)}</span><button class="btn danger sm" data-e="${esc(e)}">삭제</button></div>`).join("");
-}
-$("adminList").addEventListener("click",async e=>{const b=e.target.closest("button[data-e]");if(!b)return;
-  if(b.dataset.armed!=="1"){b.dataset.armed="1";b.textContent="정말 삭제";setTimeout(()=>{b.dataset.armed="";b.textContent="삭제"},3000);return}
-  try{await api.removeAdmin(b.dataset.e);toast("관리자에서 삭제했어요.")}catch(err){toast("삭제하지 못했어요.")}});
-$("naAdd").onclick=async()=>{const v=$("naEmail").value.trim().toLowerCase();
-  if(!/^[^\s@\/]+@[^\s@\/]+\.[^\s@\/]+$/.test(v))return toast("이메일 형식을 확인해 주세요.");
-  try{await api.addAdmin(v);$("naEmail").value="";toast("관리자를 추가했어요.")}catch(e){toast("추가하지 못했어요.")}};
 $("sSave").onclick=async()=>{
   const d={title:$("sTitle").value.trim()||"회의실 예약",startHour:+$("sStart").value,endHour:+$("sEnd").value,slotMin:+$("sSlot").value,maxDays:+$("sDays").value,mailUrl:$("sMail").value.trim()};
   if(d.endHour<=d.startHour){$("sMsg").textContent="운영 종료가 시작보다 늦어야 해요.";return}
@@ -651,12 +644,25 @@ const pageUrl=()=>location.href.split("#")[0].split("?")[0];
 $("menuBtn").onclick=()=>{
   openSheet("메뉴",`<button class="mi" id="mQr">QR 코드 보기 · 인쇄</button><button class="mi" id="mCopy">링크 복사</button>
     ${S.admin?`<button class="mi" id="mOut">관리자 로그아웃</button>`:`<button class="mi" id="mIn">관리자 로그인</button>`}
-    <div class="note" style="margin-top:14px">${S.admin?`${esc(S.user.email)} 계정으로 로그인되어 있어요.`:"관리자로 등록된 구글 계정만 관리 탭을 쓸 수 있어요."}</div>`);
+    ${S.admin?`<div class="note" style="margin-top:14px">관리자로 로그인되어 있어요.</div>`:""}`);
   $("mQr").onclick=showQr;
   $("mCopy").onclick=async()=>{try{await navigator.clipboard.writeText(pageUrl());toast("링크를 복사했어요.")}catch(e){toast(pageUrl())}};
-  if($("mIn"))$("mIn").onclick=async()=>{try{await api.adminLogin();closeSheet()}catch(e){toast("로그인하지 못했어요.")}};
+  if($("mIn"))$("mIn").onclick=openLogin;
   if($("mOut"))$("mOut").onclick=async()=>{await api.adminLogout();closeSheet();toast("로그아웃했어요.")};
 };
+function openLogin(){
+  openSheet("관리자 로그인",`<div class="f"><label>아이디</label><input class="in" id="lId" autocomplete="username" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="next"></div>
+    <div class="f"><label>비밀번호</label><input class="in" id="lPw" type="password" autocomplete="current-password" enterkeyhint="go"></div>
+    <div class="err" id="lErr"></div><div class="btns"><button class="btn" id="lGo">로그인</button><button class="btn ghost" data-close>취소</button></div>`);
+  const go=async()=>{
+    const id=toKeys($("lId").value.trim()),pw=toKeys($("lPw").value);
+    if(id!==ADMIN_ID||pw.length<6){$("lErr").textContent="아이디 또는 비밀번호가 맞지 않아요.";return}
+    $("lGo").disabled=true;$("lGo").textContent="확인 중…";
+    try{await api.adminLogin(pw);closeSheet()}
+    catch(e){$("lGo").disabled=false;$("lGo").textContent="로그인";$("lErr").textContent=e&&e.code==="auth/too-many-requests"?"시도가 너무 많아요. 잠시 후 다시 해 주세요.":e&&e.code==="auth/operation-not-allowed"?"관리자 로그인이 아직 켜져 있지 않아요.":"아이디 또는 비밀번호가 맞지 않아요."}
+  };
+  $("lGo").onclick=go;$("lPw").onkeydown=e=>{if(e.key==="Enter")go()};
+}
 function loadQrLib(){if(window.QRCode)return Promise.resolve();
   return loadQrLib.p||(loadQrLib.p=new Promise((res,rej)=>{const sc=document.createElement("script");sc.src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js";sc.onload=res;sc.onerror=()=>{loadQrLib.p=null;rej()};document.head.appendChild(sc)}))}
 async function makeQr(el,size){el.innerHTML='<div class="note">QR 만드는 중…</div>';
@@ -703,11 +709,11 @@ async function start(){
   subToday();
   api.onUser(async u=>{S.user=u;
     S.unsub.mine&&S.unsub.mine();S.unsub.mine=api.watchMine(u.uid,list=>{S.mine=list;renderMine();renderDay()},()=>{});
-    const was=S.admin;S.admin=!!u.email&&await api.isAdmin();$("navAdmin").hidden=!S.admin;
-    S.unsub.all&&S.unsub.all();S.unsub.adm&&S.unsub.adm();S.unsub.all=S.unsub.adm=null;
+    const was=S.admin;S.admin=u.email===ADMIN_EMAIL&&await api.isAdmin();$("navAdmin").hidden=!S.admin;
+    S.unsub.all&&S.unsub.all();S.unsub.all=null;
     if(S.admin){S.unsub.all=api.watchFrom(today(),list=>{S.all=list;if(S.view==="admin")renderAll()},()=>{});
-      S.unsub.adm=api.watchAdmins(list=>{S.admins=list;if(S.view==="admin")renderAdmins()},()=>{});if(!was)toast("관리자로 로그인했어요.")}
-    else{if(u.email)toast("관리자로 등록되지 않은 계정이에요.");if(S.view==="admin")show("home")}
+      if(!was){show("admin");toast(S.rooms.length?"관리자로 로그인했어요.":"관리자로 로그인했어요. 회의실을 추가해 주세요.")}}
+    else if(S.view==="admin")show("home");
     renderDay()},()=>banner("익명 접속이 꺼져 있어요. 관리자에게 알려 주세요.",true));
   setInterval(()=>{if(today()!==cur){const was=S.date===cur;cur=today();subToday();if(was||S.date<cur){S.date=cur;subDay()}renderDates()}
     renderRooms();renderDay();renderMine()},60000);
