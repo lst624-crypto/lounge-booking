@@ -294,6 +294,7 @@ function toKeys(str){
     else if(c>=0x3131&&c<=0x3163)o+=J[c-0x3131];else o+=ch}
   return o.toLowerCase();
 }
+const MAIL_URL="https://script.google.com/macros/s/AKfycbx554V5CuKmCIJMYeGyAm1jRlNlrPORX6fgQ45NU28ITTKEoCWpQ7R1nn7kYvYURXCb/exec"; // 예약 확인 메일을 보내는 Apps Script 주소
 const GRAN=30; // 겹침 방지용 내부 잠금 단위(분). 바꾸지 마세요.
 const $=id=>document.getElementById(id);
 const WD=["일","월","화","수","목","금","토"];
@@ -355,7 +356,7 @@ async function makeFirebaseApi(){
 
 /* ---------- 상태 ---------- */
 const S={user:null,admin:false,rooms:[],roomId:null,admins:[],
-  settings:{title:"회의실 예약",slotMin:30,maxDays:14,mailUrl:""},
+  settings:{title:"회의실 예약",slotMin:30,maxDays:14,mailUrl:MAIL_URL},
   date:today(),day:[],todayList:[],mine:[],all:[],view:"home",loaded:{rooms:false,day:false,today:false},unsub:{}};
 let api;
 
@@ -385,7 +386,7 @@ const pinKey=(id,pin)=>sha256(id+":"+pin);
 function granules(roomId,date,s,e){const o=[];for(let m=s;m<e;m+=GRAN)o.push(`${roomId}_${date}_${fmt(m).replace(":","")}`);return o}
 function sortB(a,b){return (a.date+a.start).localeCompare(b.date+b.start)}
 function upcoming(b){return active(b)&&(b.date>today()||(b.date===today()&&toMin(b.end)>nowMin()))}
-const ST=()=>0, EN=()=>1440; // 하루 전체(00:00~24:00) 예약 가능
+const ST=()=>480, EN=()=>1440; // 예약 가능 시간: 08:00~24:00
 function dayList(roomId){return S.day.filter(b=>active(b)&&b.roomId===roomId).sort(sortB)}
 function freeRanges(roomId){ // 선택한 날짜의 비어 있는 구간 (오늘은 지금 이후만)
   const step=S.settings.slotMin;let from=ST();
@@ -719,7 +720,7 @@ function subDay(){
   const d=S.date;S.unsub.day=api.watchDate(d,list=>{if(d!==S.date)return;S.day=list;S.loaded.day=true;renderDay();if($("fStart")&&sheetOpen)fRefresh()},onErr);
 }
 function applySettings(v){
-  if(v)S.settings={title:v.title||"회의실 예약",slotMin:+v.slotMin||30,maxDays:+v.maxDays||14,mailUrl:v.mailUrl||""};
+  if(v)S.settings={title:v.title||"회의실 예약",slotMin:+v.slotMin||30,maxDays:+v.maxDays||14,mailUrl:v.mailUrl||MAIL_URL};
   document.title=S.settings.title;$("title").textContent=S.settings.title;
   if(S.date>maxDate())S.date=today();
 }
