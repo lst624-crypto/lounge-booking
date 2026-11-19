@@ -63,15 +63,17 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
-    // 비공개 정보(실명, 이메일, 취소 비밀번호 해시): 관리자만 읽기
+    // 비공개 정보(실명, 이메일, 휴대폰, 취소 비밀번호 해시): 관리자만 읽기
     match /secrets/{id} {
       allow read: if isAdmin();
       allow create: if signedIn()
-        && request.resource.data.keys().hasOnly(['pinKey','email','name'])
+        && request.resource.data.keys().hasOnly(['pinKey','email','name','phone'])
         && request.resource.data.pinKey is string
         && request.resource.data.pinKey.matches('^[0-9a-f]{64}$')
         && isStr(request.resource.data.email, 3, 80)
         && isStr(request.resource.data.name, 1, 20)
+        && request.resource.data.phone is string
+        && request.resource.data.phone.matches('^01[016789]-[0-9]{3,4}-[0-9]{4}$')
         && getAfter(bookingPath(id)).data.uid == request.auth.uid;
       allow update: if false;
       allow delete: if isAdmin();

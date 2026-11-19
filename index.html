@@ -33,6 +33,16 @@
   .abar-b{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap} .abar-b .btn{flex:1;white-space:nowrap}
   .bk .del{flex:0 0 auto;height:40px;padding:0 12px;border-radius:9px;border:1px solid #e3b5ad;background:#fff;color:var(--red);font-size:14px;font-weight:700;text-align:center}
   .backbtn{display:flex;align-items:center;gap:6px;height:48px;font-size:16px;font-weight:700;margin:-4px 0 10px}
+  .bk.ended{background:#faf9f6}
+  .bk.ended .tm,.bk.ended .co{color:var(--sub)}
+  .tag.end{background:var(--soft);color:var(--sub)}
+  .linkbtn{display:flex;align-items:center;justify-content:center;gap:4px;width:100%;height:48px;font-size:15px;font-weight:600;color:var(--sub);margin:-8px 0 8px}
+  .linkbtn:active{color:var(--ink)}
+  .seg{display:flex;background:var(--soft);border-radius:10px;padding:3px;margin-bottom:18px}
+  .seg button{flex:1;height:38px;border-radius:8px;font-size:15px;font-weight:600;color:var(--sub);text-align:center}
+  .seg button.on{background:#fff;color:var(--ink);box-shadow:0 1px 2px rgba(0,0,0,.08)}
+  .pday{font-size:15px;font-weight:700;color:var(--sub);margin:18px 2px 8px}
+  .pday:first-child{margin-top:0}
   /* 회의실 */
   .rooms{display:flex;gap:8px;overflow-x:auto;margin:0 -16px 12px;padding:0 16px;scrollbar-width:none}
   .rooms::-webkit-scrollbar{display:none}
@@ -210,6 +220,13 @@
     <div id="day"><div class="skel"></div><div class="skel"></div></div>
   </section>
 
+  <section id="v-past" hidden>
+    <button class="backbtn" data-back><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M15 6l-6 6 6 6"/></svg>예약 현황으로 돌아가기</button>
+    <div class="sec"><b>지난 예약</b><span id="pastCount"></span></div>
+    <div class="seg" id="pastSeg"><button data-d="7" class="on">7일</button><button data-d="30">30일</button><button data-d="90">90일</button></div>
+    <div id="pastList"></div>
+  </section>
+
   <section id="v-mine" hidden>
     <div class="sec" style="margin-top:6px"><b>내 예약</b><span>이 기기에서 한 예약</span></div>
     <div class="list" id="mineList"></div>
@@ -319,6 +336,7 @@ async function makeFirebaseApi(){
     watchSettings:(cb,e)=>F.onSnapshot(ref("settings","main"),s=>cb(s.exists()?s.data():null),e),
     watchDate:(date,cb,e)=>F.onSnapshot(F.query(col("bookings"),F.where("date","==",date)),s=>cb(list(s)),e),
     watchMine:(uid,cb,e)=>F.onSnapshot(F.query(col("bookings"),F.where("uid","==",uid)),s=>cb(list(s)),e),
+    watchPast:(from,to,cb,e)=>F.onSnapshot(F.query(col("bookings"),F.where("date",">=",from),F.where("date","<=",to)),s=>cb(list(s)),e),
     watchFrom:(date,cb,e)=>F.onSnapshot(F.query(col("bookings"),F.where("date",">=",date)),s=>cb(list(s)),e),
     newId:()=>F.doc(col("bookings")).id,
     async anySlotTaken(ids){const r=await Promise.all(ids.map(i=>F.getDoc(ref("slots",i))));return r.some(x=>x.exists())},
@@ -374,6 +392,9 @@ function dur(m){const h=Math.floor(m/60),r=m%60;return (h?`${h}시간`:"")+(r?`$
 function nowMin(){const d=new Date();return d.getHours()*60+d.getMinutes()}
 function esc(s){return String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
 function ls(k,v){try{if(v===undefined)return localStorage.getItem(k)||"";localStorage.setItem(k,v)}catch(e){return ""}}
+function fmtPhone(v){const d=String(v).replace(/\D/g,"").slice(0,11);
+  if(d.length<4)return d;if(d.length<8)return d.slice(0,3)+"-"+d.slice(3);
+  return d.length===11?`${d.slice(0,3)}-${d.slice(3,7)}-${d.slice(7)}`:`${d.slice(0,3)}-${d.slice(3,6)}-${d.slice(6)}`}
 function maskName(n){const a=Array.from(n.trim());if(a.length<=1)return (a[0]||"")+"*";if(a.length===2)return a[0]+"*";return a[0]+"*".repeat(a.length-2)+a[a.length-1]}
 const active=b=>b.status==="active";
 const isMine=b=>S.user&&b.uid===S.user.uid;
@@ -452,17 +473,19 @@ function renderDay(){
     :`<div class="empty">등록된 회의실이 없어요.<br>관리자가 메뉴 › 관리자 로그인 후 추가할 수 있어요.</div>`;if($("emAdd"))$("emAdd").onclick=openRoomAdd;return}
   if(!S.loaded.day){el.innerHTML=`<div class="skel"></div><div class="skel"></div>`;return}
   const st=ST(),en=EN(),span=en-st,isT=S.date===today(),nm=nowMin();
-  const all=dayList(S.roomId),list=all.filter(b=>!(isT&&toMin(b.end)<=nm));
+  const all=dayList(S.roomId),list=all;
   let h=`<div class="sec"><b>${dLabel(S.date)}</b><span>예약 ${all.length}건</span></div>`;
   // 예약 목록
   h+=`<div class="list">`;
   h+=list.length?list.map(b=>{const live=isT&&toMin(b.start)<=nm&&nm<toMin(b.end);
-    return `<div role="button" tabindex="0" class="bk${live?" now-on":""}" data-id="${esc(b.id)}"><div class="tm num">${esc(b.start)} – ${esc(b.end)}<small>${dur(toMin(b.end)-toMin(b.start))}</small></div>
-      <div class="who"><div class="co">${esc(b.company||"")}${live?'<span class="tag live">사용 중</span>':""}${isMine(b)?'<span class="tag">내 예약</span>':""}</div><div class="nm">${esc(b.name)}</div></div>${tail(b)}</div>`}).join("")
-    :`<div class="empty">${all.length?"남은 예약이 없어요.":"아직 예약이 없어요."}<br>아래 ‘예약하기’를 눌러 원하는 시간을 예약하세요.</div>`;
-  el.innerHTML=h+"</div>";
+    const ended=isT&&toMin(b.end)<=nm;
+    return `<div role="button" tabindex="0" class="bk${live?" now-on":""}${ended?" ended":""}" data-id="${esc(b.id)}"><div class="tm num">${esc(b.start)} – ${esc(b.end)}<small>${dur(toMin(b.end)-toMin(b.start))}</small></div>
+      <div class="who"><div class="co">${esc(b.company||"")}${live?'<span class="tag live">사용 중</span>':ended?'<span class="tag end">종료</span>':isMine(b)?'<span class="tag">내 예약</span>':""}</div><div class="nm">${esc(b.name)}</div></div>${tail(b)}</div>`}).join("")
+    :`<div class="empty">아직 예약이 없어요.<br>아래 ‘예약하기’를 눌러 원하는 시간을 예약하세요.</div>`;
+  el.innerHTML=h+`</div><button class="linkbtn" id="pastBtn">지난 예약 보기${ARW}</button>`;
 }
 $("day").addEventListener("click",e=>{
+  if(e.target.closest("#pastBtn"))return show("past");
   const dl=e.target.closest(".del");if(dl)return delClick(dl,S.day);
   const bk=e.target.closest(".bk");if(bk)return openDetail(S.day.find(b=>b.id===bk.dataset.id));
 });
@@ -515,14 +538,17 @@ function openForm(pre={}){
     <div class="f"><label>예약자 이름 <em>*</em></label><input class="in" id="fName" maxlength="20" autocomplete="name" placeholder="예: 홍길동" enterkeyhint="next">
       <div class="note" id="fMask">다른 사람에게는 이름 가운데가 가려져 보여요. (예: 홍*동)</div></div>
     <div class="f"><label>이메일 <em>*</em></label><input class="in" id="fEmail" type="email" inputmode="email" autocomplete="email" maxlength="80" placeholder="name@company.com" enterkeyhint="next">
-      <div class="note">예약 확인 메일을 보내 드려요. 다른 사람에게는 보이지 않아요.</div></div>
+      <div class="note">예약 확인 메일을 보내 드려요.</div></div>
+    <div class="f"><label>휴대폰 번호 <em>*</em></label><input class="in num" id="fPhone" type="tel" inputmode="numeric" autocomplete="tel" maxlength="13" placeholder="010-0000-0000" enterkeyhint="next">
+      <div class="note">이메일과 휴대폰 번호는 관리자만 볼 수 있어요.</div></div>
     <div class="f"><label>취소 비밀번호 (숫자 4자리) <em>*</em></label><input class="in pin num" id="fPin" type="password" inputmode="numeric" pattern="[0-9]*" autocomplete="off" placeholder="0000">
       <div class="note">예약을 취소할 때 꼭 필요해요. 잊지 않게 기억해 주세요.</div></div>
     <span class="flabel">이용 수칙 확인 <em style="color:var(--red);font-style:normal">*</em></span>
     <div class="rules" id="fRules">${RULES.map((r,i)=>`<button type="button" class="rule" data-i="${i}" role="checkbox" aria-checked="false"><span class="box">${CHK}</span><span><b>${r[0]}</b><span>${r[1]}</span></span></button>`).join("")}</div>
     <div class="err" id="fErr"></div>
     <div class="btns"><button class="btn" id="fGo" disabled>이용 수칙 3가지를 확인해 주세요</button><button class="btn ghost" data-close>취소</button></div>`);
-  $("fCo").value=ls("lb_co");$("fName").value=ls("lb_name");$("fEmail").value=ls("lb_email");
+  $("fCo").value=ls("lb_co");$("fName").value=ls("lb_name");$("fEmail").value=ls("lb_email");$("fPhone").value=ls("lb_phone");
+  $("fPhone").oninput=e=>{e.target.value=fmtPhone(e.target.value)};
   fRefresh();showMask();
   $("fRoom").onchange=()=>{F.roomId=$("fRoom").value;F.end=null;fRefresh()};
   $("fStart").onchange=()=>{F.start=+$("fStart").value;F.end=null;fRefresh()};
@@ -556,21 +582,22 @@ function fRefresh(){
 }
 async function submit(){
   const err=t=>{$("fErr").textContent=t};
-  const company=$("fCo").value.trim(),name=$("fName").value.trim(),email=$("fEmail").value.trim(),pin=$("fPin").value;
+  const company=$("fCo").value.trim(),name=$("fName").value.trim(),email=$("fEmail").value.trim(),phone=fmtPhone($("fPhone").value),pin=$("fPin").value;
   if(!company)return err("회사명(상호명)을 입력해 주세요."),$("fCo").focus();
   if(!name)return err("예약자 이름을 입력해 주세요."),$("fName").focus();
   if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))return err("이메일 형식을 확인해 주세요."),$("fEmail").focus();
+  if(!/^01[016789]-\d{3,4}-\d{4}$/.test(phone))return err("휴대폰 번호를 확인해 주세요. (예: 010-1234-5678)"),$("fPhone").focus();
   if(!/^\d{4}$/.test(pin))return err("취소 비밀번호 숫자 4자리를 입력해 주세요."),$("fPin").focus();
   if(!F.checks.every(Boolean)){document.querySelectorAll("#fRules .rule").forEach((r,i)=>r.classList.toggle("miss",!F.checks[i]));return err("이용 수칙을 모두 확인해 주세요.")}
   if(!(F.end>F.start))return err("시간을 다시 선택해 주세요.");
-  ls("lb_co",company);ls("lb_name",name);ls("lb_email",email);
+  ls("lb_co",company);ls("lb_name",name);ls("lb_email",email);ls("lb_phone",phone);
   const go=$("fGo");go.disabled=true;go.textContent="예약 중…";err("");
   const st=F.start,en=F.end,roomId=F.roomId;F.busy=true; // 저장 중에는 선택한 시간을 고정
   const id=api.newId(),date=S.date,slots=granules(roomId,date,st,en),r=room(roomId);
   const fail=t=>{F.busy=false;go.disabled=false;go.textContent="예약하기";err(t);fRefresh()};
   try{
     if(await api.anySlotTaken(slots))return fail("방금 다른 예약이 들어왔어요. 시간을 다시 선택해 주세요.");
-    await api.create(id,{roomId,roomName:r?r.name:"",date,start:fmt(st),end:fmt(en),company,name:maskName(name),uid:S.user.uid,status:"active",slots},{pinKey:await pinKey(id,pin),email,name},slots);
+    await api.create(id,{roomId,roomName:r?r.name:"",date,start:fmt(st),end:fmt(en),company,name:maskName(name),uid:S.user.uid,status:"active",slots},{pinKey:await pinKey(id,pin),email,name,phone},slots);
     const mail=S.settings.mailUrl;
     if(mail)fetch(mail,{method:"POST",mode:"no-cors",keepalive:true,headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify({id,email,name})}).catch(()=>{});
     openSheet("예약 완료",`<div class="done"><div class="ok"><svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></div><h3>예약이 완료되었습니다</h3></div>
@@ -589,11 +616,12 @@ function openDetail(b){
     <dt>일시</dt><dd class="num">${esc(dLabel(b.date))}<br>${esc(b.start)} – ${esc(b.end)} (${dur(toMin(b.end)-toMin(b.start))})</dd>
     <dt>회사명</dt><dd>${esc(b.company||"-")}</dd>
     <dt>예약자</dt><dd><span id="dName">${esc(b.name)}</span>${isMine(b)?'<span class="tag">내 예약</span>':""}</dd>
-    ${S.admin?`<dt>이메일</dt><dd id="dEmail">불러오는 중…</dd>`:""}</dl>
+    ${S.admin?`<dt>이메일</dt><dd id="dEmail">불러오는 중…</dd><dt>휴대폰</dt><dd id="dPhone" class="num">불러오는 중…</dd>`:""}</dl>
     ${past||direct?"":`<div class="f" id="pinBox" hidden><label>취소 비밀번호</label><input class="in pin num" id="dPin" type="password" inputmode="numeric" pattern="[0-9]*" placeholder="0000"></div>`}
     <div class="err" id="dErr"></div>
     <div class="btns">${past?"":`<button class="btn danger" id="dCancel">예약 취소</button>`}<button class="btn ghost" data-close>닫기</button></div>`);
-  if(S.admin)api.getSecret(b.id).then(v=>{if($("dEmail"))$("dEmail").textContent=v.email||"-";if(v.name&&$("dName"))$("dName").textContent=v.name}).catch(()=>{if($("dEmail"))$("dEmail").textContent="-"});
+  if(S.admin)api.getSecret(b.id).then(v=>{if($("dEmail"))$("dEmail").textContent=v.email||"-";if($("dPhone"))$("dPhone").innerHTML=v.phone?`<a href="tel:${esc(v.phone.replace(/-/g,""))}" style="color:inherit">${esc(v.phone)}</a>`:"-";if(v.name&&$("dName"))$("dName").textContent=v.name})
+    .catch(()=>{["dEmail","dPhone"].forEach(k=>{if($(k))$(k).textContent="-"})});
   if(past)return;
   if($("dPin"))$("dPin").oninput=e=>{e.target.value=e.target.value.replace(/\D/g,"").slice(0,4)};
   let armed=false;
@@ -626,6 +654,31 @@ function renderMine(){
 $("mineList").addEventListener("click",e=>{const dl=e.target.closest(".del");if(dl)return delClick(dl,S.mine);const b=e.target.closest(".bk");if(b)openDetail(S.mine.find(x=>x.id===b.dataset.id))});
 function renderAll(){const list=S.all.filter(upcoming).sort(sortB);$("allList").innerHTML=list.length?list.map(rowHtml).join(""):`<div class="empty">예정된 예약이 없어요.</div>`}
 $("allList").addEventListener("click",e=>{const dl=e.target.closest(".del");if(dl)return delClick(dl,S.all);const b=e.target.closest(".bk");if(b)openDetail(S.all.find(x=>x.id===b.dataset.id))});
+
+/* ---------- 지난 예약 ---------- */
+let pastDays=7;
+function isEnded(b){return b.date<today()||(b.date===today()&&toMin(b.end)<=nowMin())}
+function subPast(){
+  S.unsub.past&&S.unsub.past();S.past=null;renderPast();
+  S.unsub.past=api.watchPast(addDays(today(),-pastDays),today(),list=>{S.past=list;renderPast()},()=>{S.past=[];renderPast()});
+}
+function renderPast(){
+  const el=$("pastList");
+  if(S.past==null){el.innerHTML=`<div class="skel"></div><div class="skel"></div>`;$("pastCount").textContent="";return}
+  const list=S.past.filter(b=>active(b)&&isEnded(b)).sort((a,b)=>(b.date+b.start).localeCompare(a.date+a.start));
+  $("pastCount").textContent=`최근 ${pastDays}일 · ${list.length}건`;
+  if(!list.length){el.innerHTML=`<div class="empty">최근 ${pastDays}일 동안 지난 예약이 없어요.</div>`;return}
+  let h="",cur="";
+  for(const b of list){
+    if(b.date!==cur){if(cur)h+="</div>";cur=b.date;h+=`<div class="pday">${dLabel(b.date)}</div><div class="list" style="margin-bottom:0">`}
+    h+=`<div role="button" tabindex="0" class="bk" data-id="${esc(b.id)}"><div class="tm num">${esc(b.start)} – ${esc(b.end)}<small>${dur(toMin(b.end)-toMin(b.start))}</small></div>
+      <div class="who"><div class="co">${esc(b.company||"")}</div><div class="nm">${esc(roomName(b))} · ${esc(b.name)}</div></div>${tail(b)}</div>`;
+  }
+  el.innerHTML=h+"</div>";
+}
+$("pastSeg").onclick=e=>{const b=e.target.closest("button[data-d]");if(!b||+b.dataset.d===pastDays)return;
+  pastDays=+b.dataset.d;$("pastSeg").querySelectorAll("button").forEach(x=>x.classList.toggle("on",x===b));subPast()};
+$("pastList").addEventListener("click",e=>{const dl=e.target.closest(".del");if(dl)return delClick(dl,S.past||[]);const b=e.target.closest(".bk");if(b)openDetail((S.past||[]).find(x=>x.id===b.dataset.id))});
 
 /* ---------- 관리 ---------- */
 function renderAdmin(){
@@ -710,9 +763,10 @@ $("abAdd").onclick=openRoomAdd;$("abManage").onclick=()=>show("admin");
 /* ---------- 탭 ---------- */
 $("nav").addEventListener("click",e=>{const b=e.target.closest("button[data-v]");if(b)show(b.dataset.v)});
 function show(v){S.view=v;
-  document.querySelectorAll("#nav button").forEach(b=>b.classList.toggle("on",b.dataset.v===v));
-  ["home","mine","admin"].forEach(x=>$("v-"+x).hidden=x!==v);$("adminBar").hidden=!(S.admin&&v==="home");
-  $("cta").hidden=v==="admin";window.scrollTo(0,0);if(v==="admin")renderAdmin()}
+  document.querySelectorAll("#nav button").forEach(b=>b.classList.toggle("on",b.dataset.v===(v==="past"?"home":v)));
+  ["home","past","mine","admin"].forEach(x=>$("v-"+x).hidden=x!==v);
+  if(v==="past")subPast();else if(S.unsub.past){S.unsub.past();S.unsub.past=null}$("adminBar").hidden=!(S.admin&&v==="home");
+  $("cta").hidden=v==="admin"||v==="past";window.scrollTo(0,0);if(v==="admin")renderAdmin()}
 
 /* ---------- 실시간 연결 ---------- */
 function onErr(){banner("데이터를 불러오지 못했어요. 새로고침해 주세요.",true)}
